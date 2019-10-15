@@ -9,6 +9,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:image/image.dart' as imglib;
 
 class CameraExampleHome extends StatefulWidget {
   @override
@@ -41,6 +42,7 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
   VideoPlayerController videoController;
   VoidCallback videoPlayerListener;
   bool enableAudio = true;
+  CameraImage _currentImage;
 
   @override
   void initState() {
@@ -200,7 +202,8 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
           icon: const Icon(Icons.camera_alt),
           color: Colors.blue,
           onPressed: controller != null &&
-                  controller.value.isInitialized
+                  controller.value.isInitialized &&
+                  !controller.value.isRecordingVideo
               ? onTakePictureButtonPressed
               : null,
         ),
@@ -292,6 +295,10 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
 
     try {
       await controller.initialize();
+
+      controller.startImageStream((CameraImage availableImage) {
+        _currentImage = availableImage;
+      });
     } on CameraException catch (e) {
       _showCameraException(e);
     }
@@ -302,15 +309,22 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
   }
 
   void onTakePictureButtonPressed() {
-    takePicture().then((String filePath) {
-      if (mounted) {
-        setState(() {
-          imagePath = filePath;
-          videoController?.dispose();
-          videoController = null;
-        });
-        if (filePath != null) showInSnackBar('Picture saved to $filePath');
-      }
+//    takePicture().then((String filePath) {
+//      if (mounted) {
+//        setState(() {
+//          imagePath = filePath;
+//          videoController?.dispose();
+//          videoController = null;
+//        });
+//        if (filePath != null) showInSnackBar('Picture saved to $filePath');
+//      }
+//    });
+    convertYUV420toImageColor(_currentImage).then((image){
+      showDialog<void>(context: context, builder: (context){
+        return new Container(
+          child: image,
+        );
+      });
     });
   }
 
@@ -452,6 +466,8 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
     } on CameraException catch (e) {
       _showCameraException(e);
       return null;
+    } on Exception catch(e){
+      return null;
     }
     return filePath;
   }
@@ -459,6 +475,46 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
   void _showCameraException(CameraException e) {
     logError(e.code, e.description);
     showInSnackBar('Error: ${e.code}\n${e.description}');
+  }
+
+  Future<Image> convertYUV420toImageColor(CameraImage image) async {
+    try {
+      final int width = image.width;
+      final int height = image.height;
+      final int uvRowStride = image.planes[1].bytesPerRow;
+      final int uvPixelStride = image.planes[1].bytesPerPixel;
+
+      print("uvRowStride: " + uvRowStride.toString());
+      print("uvPixelStride: " + uvPixelStride.toString());
+
+      var img = imglib.Image(width, height); // Create Image buffer
+
+      // Fill image buffer with plane[0] from YUV420_888
+      for(int x=0; x < width; x++) {
+        for(int y=0; y < height; y++) {
+          final int uvIndex = uvPixelStride * (x/2).floor() + uvRowStride*(y/2).floor();
+          final int index = y * width + x;
+
+          final yp = image.planes[0].bytes[index];
+          final up = image.planes[1].bytes[uvIndex];
+          final vp = image.planes[2].bytes[uvIndex];
+          // Calculate pixel color
+          int r = (yp + vp * 1436 / 1024 - 179).round().clamp(0, 255);
+          int g = (yp - up * 46549 / 131072 + 44 -vp * 93604 / 131072 + 91).round().clamp(0, 255);
+          int b = (yp + up * 1814 / 1024 - 227).round().clamp(0, 255);
+          // color: 0x FF  FF  FF  FF
+          //           A   B   G   R
+          img.data[index] = (0xFF << 24) | (b << 16) | (g << 8) | r;
+        }
+      }
+
+      imglib.JpegEncoder jpgEncoder = new imglib.JpegEncoder(quality: 90);
+      List<int> jpeg = jpgEncoder.encodeImage(img);
+      return Image.memory(jpeg);
+    } catch (e) {
+      print(">>>>>>>>>>>> ERROR:" + e.toString());
+    }
+    return null;
   }
 }
 
