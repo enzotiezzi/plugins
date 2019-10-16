@@ -44,6 +44,7 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
   VoidCallback videoPlayerListener;
   bool enableAudio = true;
   CameraImage _currentImage;
+  bool _alreadyTookPicture = false;
 
   @override
   void initState() {
@@ -283,7 +284,6 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
     controller = CameraController(
       cameraDescription,
       ResolutionPreset.medium,
-      enableAudio: enableAudio,
     );
 
     // If the controller is updated then update the UI.
@@ -296,10 +296,6 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
 
     try {
       await controller.initialize();
-
-      controller.startImageStream((CameraImage availableImage) {
-        _currentImage = availableImage;
-      });
     } on CameraException catch (e) {
       _showCameraException(e);
     }
@@ -310,22 +306,27 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
   }
 
   void onTakePictureButtonPressed() {
-//    takePicture().then((String filePath) {
-//      if (mounted) {
-//        setState(() {
-//          imagePath = filePath;
-//          videoController?.dispose();
-//          videoController = null;
-//        });
-//        if (filePath != null) showInSnackBar('Picture saved to $filePath');
-//      }
+//  _alreadyTookPicture = true;
+//
+//    convertYUV420toFile(_currentImage).then((image) {
+//      showDialog<void>(
+//          context: context,
+//          builder: (context) {
+//            return new Container(
+//              child: Image.file(image),
+//            );
+//          });
 //    });
-    convertYUV420toImageColor(_currentImage).then((image){
-      showDialog<void>(context: context, builder: (context){
-        return new Container(
-          child: Image.file(image),
-        );
-      });
+
+    takePicture().then((String filePath) {
+      if (mounted) {
+        setState(() {
+          imagePath = filePath;
+          videoController?.dispose();
+          videoController = null;
+        });
+        if (filePath != null) showInSnackBar('Picture saved to $filePath');
+      }
     });
   }
 
@@ -467,7 +468,7 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
     } on CameraException catch (e) {
       _showCameraException(e);
       return null;
-    } on Exception catch(e){
+    } on Exception catch (e) {
       return null;
     }
     return filePath;
@@ -478,7 +479,7 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
     showInSnackBar('Error: ${e.code}\n${e.description}');
   }
 
-  Future<File> convertYUV420toImageColor(CameraImage image) async {
+  Future<File> convertYUV420toFile(CameraImage image) async {
     try {
       final int width = image.width;
       final int height = image.height;
@@ -487,10 +488,10 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
 
       var img = imglib.Image(width, height);
 
-
-      for(int x=0; x < width; x++) {
-        for(int y=0; y < height; y++) {
-          final int uvIndex = uvPixelStride * (x/2).floor() + uvRowStride*(y/2).floor();
+      for (int x = 0; x < width; x++) {
+        for (int y = 0; y < height; y++) {
+          final int uvIndex =
+              uvPixelStride * (x / 2).floor() + uvRowStride * (y / 2).floor();
           final int index = y * width + x;
 
           final yp = image.planes[0].bytes[index];
@@ -498,7 +499,9 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
           final vp = image.planes[2].bytes[uvIndex];
 
           int r = (yp + vp * 1436 / 1024 - 179).round().clamp(0, 255);
-          int g = (yp - up * 46549 / 131072 + 44 -vp * 93604 / 131072 + 91).round().clamp(0, 255);
+          int g = (yp - up * 46549 / 131072 + 44 - vp * 93604 / 131072 + 91)
+              .round()
+              .clamp(0, 255);
           int b = (yp + up * 1814 / 1024 - 227).round().clamp(0, 255);
 
           img.data[index] = (0xFF << 24) | (b << 16) | (g << 8) | r;
@@ -514,7 +517,7 @@ class _CameraExampleHomeState extends State<CameraExampleHome>
       final String filePath = '$dirPath/${timestamp()}.jpg';
 
       var file = new File(filePath);
-      file.writeAsBytesSync(jpeg);
+      file = await file.writeAsBytes(jpeg);
 
       return file;
     } catch (e) {
